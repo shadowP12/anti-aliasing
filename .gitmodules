@@ -1,0 +1,12 @@
+[submodule "extern/volk"]
+	path = extern/volk
+	url = https://github.com/zeux/volk.git
+[submodule "extern/Vulkan-Headers"]
+	path = extern/Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "extern/glfw"]
+	path = extern/glfw
+	url = https://github.com/glfw/glfw.git
+[submodule "extern/spark"]
+	path = extern/spark
+	url = https://github.com/hipiPan/spark.git

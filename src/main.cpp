@@ -1,9 +1,14 @@
+#include "scene.h"
+#include "scene_importer.h"
+#include "camera.h"
+#include "camera_controller.h"
+#include "renderer.h"
 #include <core/path.h>
+#include <core/io/file_access.h>
 #include <input/input.h>
 #include <rhi/ez_vulkan.h>
 #include <rhi/shader_manager.h>
 #include <rhi/shader_compiler.h>
-#include <scene/scene_tree.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
@@ -30,13 +35,13 @@ static void mouse_scroll_callback(GLFWwindow* window, double offset_x, double of
 int main()
 {
     // Path settings
-    Path::register_protocol("content", std::string(PROJECT_DIR) + "/content");
-    Path::register_protocol("shaders", std::string(PROJECT_DIR) + "/content/shaders");
+    Path::register_protocol("content", std::string(PROJECT_DIR) + "/content/");
+    Path::register_protocol("scene", std::string(PROJECT_DIR) + "/content/scene/");
+    Path::register_protocol("shader", std::string(PROJECT_DIR) + "/content/shader/");
 
     ez_init();
     ShaderManager::get()->setup();
     ShaderCompiler::get()->setup();
-    SceneTree::get()->setup();
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* glfw_window = glfwCreateWindow(800, 600, "anti-aliasing", nullptr, nullptr);
@@ -46,6 +51,17 @@ int main()
     glfwSetScrollCallback(glfw_window, mouse_scroll_callback);
     EzSwapchain swapchain = VK_NULL_HANDLE;
     ez_create_swapchain(glfwGetWin32Window(glfw_window), swapchain);
+
+    Camera* camera = new Camera();
+    camera->set_aspect(800.0f/600.0f);
+    camera->set_translation(glm::vec3(0.0f, 0.0f, 0.0f));
+    CameraController* camera_controller = new CameraController();
+    camera_controller->set_camera(camera);
+    Scene* scene = load_scene("scene://dragon/dragon.gltf");
+    Renderer* renderer = new Renderer();
+    renderer->set_scene(scene);
+    renderer->set_camera(camera);
+    renderer->set_aa(Renderer::MSAA);
 
     while (!glfwWindowShouldClose(glfw_window))
     {
@@ -58,9 +74,12 @@ int main()
 
         if (swapchain_status == EzSwapchainStatus::Resized)
         {
+            camera->set_aspect(swapchain->width/swapchain->height);
         }
 
         ez_acquire_next_image(swapchain);
+
+        renderer->render(swapchain);
 
         VkImageMemoryBarrier2 present_barrier[] = { ez_image_barrier(swapchain, EZ_RESOURCE_STATE_PRESENT) };
         ez_pipeline_barrier(0, 0, nullptr, 1, present_barrier);
@@ -73,12 +92,16 @@ int main()
         Input::get()->reset();
     }
 
+    delete renderer;
+    delete scene;
+    delete camera;
+    delete camera_controller;
+
     ez_destroy_swapchain(swapchain);
     glfwDestroyWindow(glfw_window);
     glfwTerminate();
     ShaderManager::get()->cleanup();
     ShaderCompiler::get()->cleanup();
-    SceneTree::get()->cleanup();
     ez_flush();
     ez_terminate();
     return 0;

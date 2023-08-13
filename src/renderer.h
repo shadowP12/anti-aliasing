@@ -61,6 +61,9 @@ private:
     EzTexture _color_rt = VK_NULL_HANDLE;
     EzTexture _depth_rt = VK_NULL_HANDLE;
     EzTexture _resolve_rt = VK_NULL_HANDLE;
+    EzTexture _post_rt = VK_NULL_HANDLE;
     friend class BasePass;
     BasePass* _base_pass;
+    friend class FXAAPass;
+    FXAAPass* _fxaa;
 };

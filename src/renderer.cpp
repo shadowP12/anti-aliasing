@@ -1,11 +1,16 @@
 #include "renderer.h"
 #include "camera.h"
 #include "scene.h"
+#include "rsg.h"
 #include "base_pass.h"
+#include "fxaa_pass.h"
 
 Renderer::Renderer()
 {
+    init_rsg();
+
     _base_pass = new BasePass(this);
+    _fxaa = new FXAAPass(this);
 
     EzBufferDesc buffer_desc{};
     buffer_desc.size = sizeof(ViewBufferType);
@@ -16,7 +21,10 @@ Renderer::Renderer()
 
 Renderer::~Renderer()
 {
+    uninit_rsg();
+
     delete _base_pass;
+    delete _fxaa;
 
     if (_scene_buffer)
         ez_destroy_buffer(_scene_buffer);
@@ -28,6 +36,8 @@ Renderer::~Renderer()
         ez_destroy_texture(_color_rt);
     if(_depth_rt)
         ez_destroy_texture(_depth_rt);
+    if(_post_rt)
+        ez_destroy_texture(_post_rt);
 }
 
 void Renderer::set_scene(Scene* scene)
@@ -55,7 +65,7 @@ void Renderer::update_rendertarget()
     desc.width = _width;
     desc.height = _height;
     desc.format = VK_FORMAT_R8G8B8A8_UNORM;
-    desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     if (_aa == AA::MSAA)
     {
         if (_resolve_rt)
@@ -64,13 +74,20 @@ void Renderer::update_rendertarget()
         ez_create_texture_view(_resolve_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
         desc.samples = VK_SAMPLE_COUNT_4_BIT;
     }
+    else if (_aa == AA::FXAA)
+    {
+        if (_post_rt)
+            ez_destroy_texture(_post_rt);
+        ez_create_texture(desc, _post_rt);
+        ez_create_texture_view(_post_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+    }
     if (_color_rt)
         ez_destroy_texture(_color_rt);
     ez_create_texture(desc, _color_rt);
     ez_create_texture_view(_color_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
 
     desc.format = VK_FORMAT_D24_UNORM_S8_UINT;
-    desc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    desc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     if (_depth_rt)
         ez_destroy_texture(_depth_rt);
     ez_create_texture(desc, _depth_rt);
@@ -147,9 +164,16 @@ void Renderer::render(EzSwapchain swapchain)
 
     // Render passes
     _base_pass->render();
+    if (_aa == FXAA)
+        _fxaa->render();
 
     // Copy to swapchain
-    EzTexture src_rt = _aa == MSAA ? _resolve_rt: _color_rt;
+    EzTexture src_rt = _color_rt;
+    if (_aa == MSAA)
+        src_rt = _resolve_rt;
+    else if (_aa == FXAA)
+        src_rt = _post_rt;
+
     VkImageMemoryBarrier2 copy_barriers[] = {
         ez_image_barrier(src_rt, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT),
         ez_image_barrier(swapchain, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT),

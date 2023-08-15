@@ -66,4 +66,6 @@ private:
     BasePass* _base_pass;
     friend class FXAAPass;
     FXAAPass* _fxaa;
+    friend class TAAPass;
+    TAAPass* _taa;
 };

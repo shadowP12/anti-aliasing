@@ -4,6 +4,7 @@
 #include "rsg.h"
 #include "base_pass.h"
 #include "fxaa_pass.h"
+#include "taa_pass.h"
 
 Renderer::Renderer()
 {
@@ -11,6 +12,7 @@ Renderer::Renderer()
 
     _base_pass = new BasePass(this);
     _fxaa = new FXAAPass(this);
+    _taa = new TAAPass(this);
 
     EzBufferDesc buffer_desc{};
     buffer_desc.size = sizeof(ViewBufferType);
@@ -25,6 +27,7 @@ Renderer::~Renderer()
 
     delete _base_pass;
     delete _fxaa;
+    delete _taa;
 
     if (_scene_buffer)
         ez_destroy_buffer(_scene_buffer);
@@ -92,6 +95,8 @@ void Renderer::update_rendertarget()
         ez_destroy_texture(_depth_rt);
     ez_create_texture(desc, _depth_rt);
     ez_create_texture_view(_depth_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+
+    _taa->set_dirty();
 }
 
 void Renderer::update_scene_buffer()
@@ -166,6 +171,8 @@ void Renderer::render(EzSwapchain swapchain)
     _base_pass->render();
     if (_aa == FXAA)
         _fxaa->render();
+    else if (_aa == TAA)
+        _taa->render();
 
     // Copy to swapchain
     EzTexture src_rt = _color_rt;

@@ -39,6 +39,8 @@ Renderer::~Renderer()
         ez_destroy_texture(_color_rt);
     if(_depth_rt)
         ez_destroy_texture(_depth_rt);
+    if(_velocity_rt)
+        ez_destroy_texture(_velocity_rt);
     if(_post_rt)
         ez_destroy_texture(_post_rt);
 }
@@ -96,6 +98,16 @@ void Renderer::update_rendertarget()
     ez_create_texture(desc, _depth_rt);
     ez_create_texture_view(_depth_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
 
+    if (_aa == AA::TAA)
+    {
+        desc.format = VK_FORMAT_R16G16_SFLOAT;
+        desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        if (_velocity_rt)
+            ez_destroy_texture(_velocity_rt);
+        ez_create_texture(desc, _velocity_rt);
+        ez_create_texture_view(_velocity_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+    }
+
     _taa->set_dirty();
 }
 
@@ -130,10 +142,18 @@ void Renderer::update_scene_buffer()
 
 void Renderer::update_view_buffer()
 {
+    // Todo: taa_jitter
+    ViewData view_data{};
+    view_data.view_matrix = _camera->get_view_matrix();
+    view_data.proj_matrix = _camera->get_proj_matrix();
+    view_data.view_position = glm::vec4(_camera->get_translation(), 0.0f);
+
+    if (_frame_number == 0)
+        _last_view_data = view_data;
+
     ViewBufferType view_buffer_type{};
-    view_buffer_type.view_matrix = _camera->get_view_matrix();
-    view_buffer_type.proj_matrix = _camera->get_proj_matrix();
-    view_buffer_type.view_position = glm::vec4(_camera->get_translation(), 0.0f);
+    view_buffer_type.cur = view_data;
+    view_buffer_type.prev = _last_view_data;
 
     VkBufferMemoryBarrier2 barrier = ez_buffer_barrier(_view_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
     ez_pipeline_barrier(0, 1, &barrier, 0, nullptr);
@@ -144,6 +164,8 @@ void Renderer::update_view_buffer()
     VkAccessFlags2 access_flags = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
     barrier = ez_buffer_barrier(_view_buffer, stage_flags, access_flags);
     ez_pipeline_barrier(0, 1, &barrier, 0, nullptr);
+
+    _last_view_data = view_data;
 }
 
 void Renderer::render(EzSwapchain swapchain)
@@ -194,4 +216,6 @@ void Renderer::render(EzSwapchain swapchain)
     copy_region.dstSubresource.layerCount = 1;
     copy_region.extent = { swapchain->width, swapchain->height, 1 };
     ez_copy_image(src_rt, swapchain, copy_region);
+
+    _frame_number++;
 }

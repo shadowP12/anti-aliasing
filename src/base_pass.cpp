@@ -20,11 +20,17 @@ void BasePass::render()
         rt_barriers[2] = ez_image_barrier(_renderer->_resolve_rt, EZ_RESOURCE_STATE_RENDERTARGET);
         ez_pipeline_barrier(0, 0, nullptr, 3, rt_barriers);
     }
+    else if (_renderer->_aa == Renderer::TAA)
+    {
+        rt_barriers[2] = ez_image_barrier(_renderer->_velocity_rt, EZ_RESOURCE_STATE_RENDERTARGET);
+        ez_pipeline_barrier(0, 0, nullptr, 3, rt_barriers);
+    }
     else
     {
         ez_pipeline_barrier(0, 0, nullptr, 2, rt_barriers);
     }
 
+    EzRenderingInfo rendering_info{};
     EzRenderingAttachmentInfo color_info{};
     color_info.texture = _renderer->_color_rt;
     color_info.clear_value.color = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -33,15 +39,22 @@ void BasePass::render()
         color_info.resolve_texture = _renderer->_resolve_rt;
         color_info.resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
     }
+    rendering_info.colors.push_back(color_info);
+
+    if (_renderer->_aa == Renderer::TAA)
+    {
+        color_info.texture = _renderer->_velocity_rt;
+        color_info.clear_value.color = {0.0f, 0.0f, 0.0f, 1.0f};
+        rendering_info.colors.push_back(color_info);
+    }
 
     EzRenderingAttachmentInfo depth_info{};
     depth_info.texture = _renderer->_depth_rt;
     depth_info.clear_value.depthStencil = {1.0f, 1};
-    EzRenderingInfo rendering_info{};
     rendering_info.width = _renderer->_width;
     rendering_info.height = _renderer->_height;
-    rendering_info.colors.push_back(color_info);
     rendering_info.depth.push_back(depth_info);
+
     ez_begin_rendering(rendering_info);
 
     if (_renderer->_aa == Renderer::MSAA)
@@ -55,8 +68,11 @@ void BasePass::render()
     ez_set_viewport(0, 0, (float)_renderer->_width, (float)_renderer->_height);
     ez_set_scissor(0, 0, (int32_t)_renderer->_width, (int32_t)_renderer->_height);
 
-    ez_set_vertex_shader(ShaderManager::get()->get_shader("shader://scene.vert"));
-    ez_set_fragment_shader(ShaderManager::get()->get_shader("shader://scene.frag"));
+    std::vector<std::string> macros;
+    if (_renderer->_aa == Renderer::TAA)
+        macros.emplace_back("MOTION_VECTORS");
+    ez_set_vertex_shader(ShaderManager::get()->get_shader("shader://scene.vert", macros));
+    ez_set_fragment_shader(ShaderManager::get()->get_shader("shader://scene.frag", macros));
 
     ez_set_vertex_binding(0, 32);
     ez_set_vertex_attrib(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0);

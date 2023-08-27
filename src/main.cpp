@@ -61,7 +61,7 @@ int main()
     Renderer* renderer = new Renderer();
     renderer->set_scene(scene);
     renderer->set_camera(camera);
-    renderer->set_aa(Renderer::NONE);
+    renderer->set_aa(Renderer::TAA);
 
     while (!glfwWindowShouldClose(glfw_window))
     {

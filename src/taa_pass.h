@@ -16,5 +16,8 @@ public:
 
 private:
     Renderer* _renderer;
+    EzTexture _taa_history = VK_NULL_HANDLE;
+    EzTexture _taa_temp = VK_NULL_HANDLE;
+    EzTexture _taa_prev_velocity = VK_NULL_HANDLE;
     bool _dirty = true;
 };

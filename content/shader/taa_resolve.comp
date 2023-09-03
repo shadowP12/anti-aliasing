@@ -1,0 +1,253 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+// Based on Spartan Engine's TAA implementation.
+// <https://github.com/PanosK92/SpartanEngine/blob/a8338d0609b85dc32f3732a5c27fb4463816a3b9/Data/shaders/temporal_antialiasing.hlsl>
+// Based on Godot Engine's TAA implementation.
+// <https://github.com/godotengine/godot/blob/master/servers/rendering/renderer_rd/shaders/effects/taa_resolve.glsl>
+
+#define FLT_MIN 0.00000001
+#define FLT_MAX 32767.0
+#define RPC_9 0.11111111111
+#define RPC_16 0.0625
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(binding = 0, rgba8) uniform image2D output_buffer;
+layout(binding = 1, rgba8) uniform image2D color_buffer;
+layout(binding = 2) uniform texture2D depth_buffer;
+layout(binding = 3, rg16f) uniform image2D velocity_buffer;
+layout(binding = 4, rg16f) uniform image2D last_velocity_buffer;
+layout(binding = 5) uniform texture2D history_buffer;
+layout(binding = 6) uniform sampler linear_sampler;
+
+layout(push_constant) uniform ConstantBlock
+{
+    vec2 resolution;
+} constant;
+
+const ivec2 kOffsets3x3[9] =
+{
+    ivec2(-1, -1),
+    ivec2(0, -1),
+    ivec2(1, -1),
+    ivec2(-1, 0),
+    ivec2(0, 0),
+    ivec2(1, 0),
+    ivec2(-1, 1),
+    ivec2(0, 1),
+    ivec2(1, 1),
+};
+
+/*------------------------------------------------------------------------------
+								VELOCITY
+------------------------------------------------------------------------------*/
+
+void depth_test_min(uvec2 pos, inout float min_depth, inout uvec2 min_pos)
+{
+    float depth = texelFetch(sampler2D(depth_buffer, linear_sampler), ivec2(pos), 0).r;
+    if (depth < min_depth)
+    {
+        min_depth = depth;
+        min_pos = pos;
+    }
+}
+
+void get_closest_pixel_velocity_3x3(in uvec2 pos, out vec2 velocity)
+{
+    float min_depth = 1.0;
+    uvec2 min_pos = pos;
+
+    depth_test_min(pos + kOffsets3x3[0], min_depth, min_pos);
+    depth_test_min(pos + kOffsets3x3[1], min_depth, min_pos);
+    depth_test_min(pos + kOffsets3x3[2], min_depth, min_pos);
+    depth_test_min(pos + kOffsets3x3[3], min_depth, min_pos);
+    depth_test_min(pos + kOffsets3x3[4], min_depth, min_pos);
+    depth_test_min(pos + kOffsets3x3[5], min_depth, min_pos);
+    depth_test_min(pos + kOffsets3x3[6], min_depth, min_pos);
+    depth_test_min(pos + kOffsets3x3[7], min_depth, min_pos);
+    depth_test_min(pos + kOffsets3x3[8], min_depth, min_pos);
+
+    // Velocity out
+    velocity = imageLoad(velocity_buffer, ivec2(min_pos)).xy;
+}
+
+/*------------------------------------------------------------------------------
+							  HISTORY SAMPLING
+------------------------------------------------------------------------------*/
+
+vec3 sample_catmull_rom_9(texture2D in_tex, sampler in_sampler, vec2 uv, vec2 resolution)
+{
+    // Source: https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1
+    // License: https://gist.github.com/TheRealMJP/bc503b0b87b643d3505d41eab8b332ae
+
+    // We're going to sample a 4x4 grid of texels surrounding the target UV coordinate. We'll do this by rounding
+    // down the sample location to get the exact center of our "starting" texel. The starting texel will be at
+    // location [1, 1] in the grid, where [0, 0] is the top left corner.
+    vec2 sample_pos = uv * resolution;
+    vec2 texPos1 = floor(sample_pos - 0.5f) + 0.5f;
+
+    // Compute the fractional offset from our starting texel to our original sample location, which we'll
+    // feed into the Catmull-Rom spline function to get our filter weights.
+    vec2 f = sample_pos - texPos1;
+
+    // Compute the Catmull-Rom weights using the fractional offset that we calculated earlier.
+    // These equations are pre-expanded based on our knowledge of where the texels will be located,
+    // which lets us avoid having to evaluate a piece-wise function.
+    vec2 w0 = f * (-0.5f + f * (1.0f - 0.5f * f));
+    vec2 w1 = 1.0f + f * f * (-2.5f + 1.5f * f);
+    vec2 w2 = f * (0.5f + f * (2.0f - 1.5f * f));
+    vec2 w3 = f * f * (-0.5f + 0.5f * f);
+
+    // Work out weighting factors and sampling offsets that will let us use bilinear filtering to
+    // simultaneously evaluate the middle 2 samples from the 4x4 grid.
+    vec2 w12 = w1 + w2;
+    vec2 offset12 = w2 / (w1 + w2);
+
+    // Compute the final UV coordinates we'll use for sampling the texture
+    vec2 texPos0 = texPos1 - 1.0f;
+    vec2 texPos3 = texPos1 + 2.0f;
+    vec2 texPos12 = texPos1 + offset12;
+
+    texPos0 /= resolution;
+    texPos3 /= resolution;
+    texPos12 /= resolution;
+
+    vec3 result = vec3(0.0f, 0.0f, 0.0f);
+
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos0.x, texPos0.y), 0.0).xyz * w0.x * w0.y;
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos12.x, texPos0.y), 0.0).xyz * w12.x * w0.y;
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos3.x, texPos0.y), 0.0).xyz * w3.x * w0.y;
+
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos0.x, texPos12.y), 0.0).xyz * w0.x * w12.y;
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos12.x, texPos12.y), 0.0).xyz * w12.x * w12.y;
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos3.x, texPos12.y), 0.0).xyz * w3.x * w12.y;
+
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos0.x, texPos3.y), 0.0).xyz * w0.x * w3.y;
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos12.x, texPos3.y), 0.0).xyz * w12.x * w3.y;
+    result += textureLod(sampler2D(in_tex, in_sampler), vec2(texPos3.x, texPos3.y), 0.0).xyz * w3.x * w3.y;
+
+    return max(result, 0.0f);
+}
+
+/*------------------------------------------------------------------------------
+							  HISTORY CLIPPING
+------------------------------------------------------------------------------*/
+
+// Based on "Temporal Reprojection Anti-Aliasing" - https://github.com/playdeadgames/temporal
+vec3 clip_aabb(vec3 aabb_min, vec3 aabb_max, vec3 p, vec3 q)
+{
+    vec3 r = q - p;
+    vec3 rmax = (aabb_max - p.xyz);
+    vec3 rmin = (aabb_min - p.xyz);
+
+    if (r.x > rmax.x + FLT_MIN)
+    r *= (rmax.x / r.x);
+    if (r.y > rmax.y + FLT_MIN)
+    r *= (rmax.y / r.y);
+    if (r.z > rmax.z + FLT_MIN)
+    r *= (rmax.z / r.z);
+
+    if (r.x < rmin.x - FLT_MIN)
+    r *= (rmin.x / r.x);
+    if (r.y < rmin.y - FLT_MIN)
+    r *= (rmin.y / r.y);
+    if (r.z < rmin.z - FLT_MIN)
+    r *= (rmin.z / r.z);
+
+    return p + r;
+}
+
+// Clip history to the neighbourhood of the current sample
+vec3 clip_history_3x3(uvec2 pos, vec3 color_history, vec2 velocity_closest)
+{
+    // Sample a 3x3 neighbourhood
+    vec3 s1 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[0])).rgb;
+    vec3 s2 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[1])).rgb;
+    vec3 s3 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[2])).rgb;
+    vec3 s4 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[3])).rgb;
+    vec3 s5 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[4])).rgb;
+    vec3 s6 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[5])).rgb;
+    vec3 s7 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[6])).rgb;
+    vec3 s8 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[7])).rgb;
+    vec3 s9 = imageLoad(color_buffer, ivec2(pos + kOffsets3x3[8])).rgb;
+
+    // Compute min and max (with an adaptive box size, which greatly reduces ghosting)
+    vec3 color_avg = (s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9) * RPC_9;
+    vec3 color_avg2 = ((s1 * s1) + (s2 * s2) + (s3 * s3) + (s4 * s4) + (s5 * s5) + (s6 * s6) + (s7 * s7) + (s8 * s8) + (s9 * s9)) * RPC_9;
+    float box_size = mix(0.0f, 2.5f, smoothstep(0.02f, 0.0f, length(velocity_closest)));
+    vec3 dev = sqrt(abs(color_avg2 - (color_avg * color_avg))) * box_size;
+    vec3 color_min = color_avg - dev;
+    vec3 color_max = color_avg + dev;
+
+    // Variance clipping
+    vec3 color = clip_aabb(color_min, color_max, clamp(color_avg, color_min, color_max), color_history);
+
+    // Clamp to prevent NaNs
+    color = clamp(color, FLT_MIN, FLT_MAX);
+
+    return color;
+}
+
+float luminance(vec3 color)
+{
+    return max(dot(color, vec3(0.299f, 0.587f, 0.114f)), 0.0001f);
+}
+
+float get_factor_disocclusion(vec2 uv_reprojected, vec2 velocity)
+{
+    float disocclusion_threshold = 0.025;
+    float disocclusion_scale = 10.0;
+    vec2 velocity_previous = imageLoad(last_velocity_buffer, ivec2(uv_reprojected * constant.resolution)).xy;
+    vec2 velocity_texels = velocity * constant.resolution;
+    vec2 prev_velocity_texels = velocity_previous * constant.resolution;
+    float disocclusion = length(prev_velocity_texels - velocity_texels) - disocclusion_threshold;
+    return clamp(disocclusion * disocclusion_scale, 0.0, 1.0);
+}
+
+vec3 taa(uvec2 pos, vec2 uv)
+{
+    vec2 velocity = imageLoad(velocity_buffer, ivec2(pos)).xy;
+    vec2 uv_reprojected = uv - velocity;
+
+    vec3 color_input = imageLoad(color_buffer, ivec2(pos)).rgb;
+    vec3 color_history = sample_catmull_rom_9(history_buffer, linear_sampler, uv_reprojected, constant.resolution).rgb;
+
+    vec2 velocity_closest = vec2(0.0);
+    get_closest_pixel_velocity_3x3(pos, velocity_closest);
+    color_history = clip_history_3x3(pos, color_history, velocity_closest);
+
+    float blend_factor = RPC_16;
+    float factor_disocclusion = get_factor_disocclusion(uv_reprojected, velocity);
+    blend_factor = clamp(blend_factor + factor_disocclusion, 0.0, 1.0);
+
+    vec3 color = vec3(0.0);
+    // Reduce flickering
+    float lum_color = luminance(color_input);
+    float lum_history = luminance(color_history);
+    float diff = abs(lum_color - lum_history) / max(lum_color, max(lum_history, 1.001));
+    diff = 1.0 - diff;
+    diff = diff * diff;
+    blend_factor = mix(0.0, blend_factor, diff);
+
+    float factor_screen = any(lessThan(uv_reprojected, vec2(0.0))) || any(greaterThan(uv_reprojected, vec2(1.0))) ? 1.0 : 0.0;
+    blend_factor = clamp(blend_factor + factor_screen, 0.0, 1.0);
+
+    color = mix(color_history, color_input, blend_factor);
+
+    return color;
+}
+
+void main()
+{
+    // Out of bounds check
+    if (any(greaterThanEqual(vec2(gl_GlobalInvocationID.xy), constant.resolution)))
+    {
+        return;
+    }
+
+    uvec2 pos = gl_GlobalInvocationID.xy;
+    vec2 uv = (gl_GlobalInvocationID.xy + 0.5) / constant.resolution;
+    vec3 result = taa(pos, uv);
+    imageStore(output_buffer, ivec2(gl_GlobalInvocationID.xy), vec4(result, 1.0));
+}

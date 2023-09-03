@@ -44,7 +44,7 @@ int main()
     ShaderCompiler::get()->setup();
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* glfw_window = glfwCreateWindow(800, 600, "anti-aliasing", nullptr, nullptr);
+    GLFWwindow* glfw_window = glfwCreateWindow(1024, 768, "anti-aliasing", nullptr, nullptr);
     glfwSetFramebufferSizeCallback(glfw_window, window_size_callback);
     glfwSetCursorPosCallback(glfw_window, cursor_position_callback);
     glfwSetMouseButtonCallback(glfw_window, mouse_button_callback);
@@ -54,7 +54,8 @@ int main()
 
     Camera* camera = new Camera();
     camera->set_aspect(800.0f/600.0f);
-    camera->set_translation(glm::vec3(0.0f, 0.0f, 0.0f));
+    camera->set_translation(glm::vec3(-0.0805398598f, 1.67968583f, 2.28514051f));
+    camera->set_euler(glm::vec3(-0.183999985f, 0.0930000245f, 0.0f));
     CameraController* camera_controller = new CameraController();
     camera_controller->set_camera(camera);
     Scene* scene = load_scene("scene://dragon/dragon.gltf");

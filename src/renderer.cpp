@@ -6,6 +6,22 @@
 #include "fxaa_pass.h"
 #include "taa_pass.h"
 
+const int TAA_JITTER_COUNT = 16;
+std::vector<glm::vec2> taa_jitter_array;
+
+float get_halton_value(int index, int base)
+{
+    float f = 1;
+    float r = 0;
+    while (index > 0)
+    {
+        f = f / static_cast<float>(base);
+        r = r + f * (index % base);
+        index = index / base;
+    }
+    return r * 2.0f - 1.0f;
+};
+
 Renderer::Renderer()
 {
     init_rsg();
@@ -19,6 +35,13 @@ Renderer::Renderer()
     buffer_desc.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     buffer_desc.memory_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     ez_create_buffer(buffer_desc, _view_buffer);
+
+    taa_jitter_array.resize(TAA_JITTER_COUNT);
+    for (int i = 0; i < TAA_JITTER_COUNT; i++)
+    {
+        taa_jitter_array[i].x = get_halton_value(i, 2);
+        taa_jitter_array[i].y = get_halton_value(i, 3);
+    }
 }
 
 Renderer::~Renderer()
@@ -69,14 +92,14 @@ void Renderer::update_rendertarget()
     EzTextureDesc desc{};
     desc.width = _width;
     desc.height = _height;
-    desc.format = VK_FORMAT_R8G8B8A8_UNORM;
-    desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    desc.format = VK_FORMAT_B8G8R8A8_UNORM;
+    desc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
     if (_aa == AA::MSAA)
     {
         if (_resolve_rt)
             ez_destroy_texture(_resolve_rt);
         ez_create_texture(desc, _resolve_rt);
-        ez_create_texture_view(_resolve_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+        ez_create_texture_view(_resolve_rt, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1);
         desc.samples = VK_SAMPLE_COUNT_4_BIT;
     }
     else if (_aa == AA::FXAA)
@@ -84,19 +107,19 @@ void Renderer::update_rendertarget()
         if (_post_rt)
             ez_destroy_texture(_post_rt);
         ez_create_texture(desc, _post_rt);
-        ez_create_texture_view(_post_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+        ez_create_texture_view(_post_rt, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1);
     }
     if (_color_rt)
         ez_destroy_texture(_color_rt);
     ez_create_texture(desc, _color_rt);
-    ez_create_texture_view(_color_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+    ez_create_texture_view(_color_rt, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1);
 
     desc.format = VK_FORMAT_D24_UNORM_S8_UINT;
     desc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     if (_depth_rt)
         ez_destroy_texture(_depth_rt);
     ez_create_texture(desc, _depth_rt);
-    ez_create_texture_view(_depth_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+    ez_create_texture_view(_depth_rt, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1);
 
     if (_aa == AA::TAA)
     {
@@ -105,7 +128,7 @@ void Renderer::update_rendertarget()
         if (_velocity_rt)
             ez_destroy_texture(_velocity_rt);
         ez_create_texture(desc, _velocity_rt);
-        ez_create_texture_view(_velocity_rt, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+        ez_create_texture_view(_velocity_rt, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1);
     }
 
     _taa->set_dirty();
@@ -142,11 +165,17 @@ void Renderer::update_scene_buffer()
 
 void Renderer::update_view_buffer()
 {
-    // Todo: taa_jitter
     ViewData view_data{};
     view_data.view_matrix = _camera->get_view_matrix();
     view_data.proj_matrix = _camera->get_proj_matrix();
     view_data.view_position = glm::vec4(_camera->get_translation(), 0.0f);
+
+    if (_aa == TAA)
+    {
+        view_data.taa_jitter = taa_jitter_array[_frame_number % TAA_JITTER_COUNT] / glm::vec2(_width, _height) * 0.3f;
+        view_data.proj_matrix[3][0] += view_data.taa_jitter.x;
+        view_data.proj_matrix[3][1] += view_data.taa_jitter.y;
+    }
 
     if (_frame_number == 0)
         _last_view_data = view_data;

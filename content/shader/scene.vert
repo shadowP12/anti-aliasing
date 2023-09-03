@@ -37,7 +37,7 @@ void main()
     screen_position = view_buffer.cur.proj_matrix * view_buffer.cur.view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
     gl_Position = screen_position;
     #else
-    gl_Position = view_buffer.prev.proj_matrix * view_buffer.prev.view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
+    gl_Position = view_buffer.cur.proj_matrix * view_buffer.cur.view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
     #endif
     out_texcoord = in_texcoord;
     out_normal = mat3(transpose(inverse(scene_buffer.transform))) * in_normal;

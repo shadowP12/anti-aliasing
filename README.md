@@ -1,9 +1,9 @@
 # anti-aliasing
 
-NoAA:  
+NOAA:  
 ![image](https://github.com/hipiPan/anti-aliasing/blob/main/screenshots/no_aa.png)
 
-Fxaa:  
+FXAA:  
 ![image](https://github.com/hipiPan/anti-aliasing/blob/main/screenshots/fxaa.png)
 
 TAA:  

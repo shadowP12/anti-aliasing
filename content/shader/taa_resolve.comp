@@ -221,18 +221,10 @@ vec3 taa(uvec2 pos, vec2 uv)
     float factor_disocclusion = get_factor_disocclusion(uv_reprojected, velocity);
     blend_factor = clamp(blend_factor + factor_disocclusion, 0.0, 1.0);
 
-    vec3 color = vec3(0.0);
-    // Reduce flickering
-    float lum_color = luminance(color_input);
-    float lum_history = luminance(color_history);
-    float diff = abs(lum_color - lum_history) / max(lum_color, max(lum_history, 1.001));
-    diff = 1.0 - diff;
-    diff = diff * diff;
-    blend_factor = mix(0.0, blend_factor, diff);
-
     float factor_screen = any(lessThan(uv_reprojected, vec2(0.0))) || any(greaterThan(uv_reprojected, vec2(1.0))) ? 1.0 : 0.0;
     blend_factor = clamp(blend_factor + factor_screen, 0.0, 1.0);
 
+    vec3 color = vec3(0.0);
     color = mix(color_history, color_input, blend_factor);
 
     return color;

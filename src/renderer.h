@@ -13,18 +13,14 @@ struct SceneBufferType
     glm::mat4 pad2;
 };
 
-struct ViewData
+struct ViewBufferType
 {
     glm::mat4 view_matrix;
     glm::mat4 proj_matrix;
-    glm::vec4 view_position;
+    glm::mat4 prev_view_matrix;
+    glm::mat4 prev_proj_matrix;
     glm::vec2 taa_jitter;
-};
-
-struct ViewBufferType
-{
-    ViewData cur;
-    ViewData prev;
+    glm::vec2 prev_taa_jitter;
 };
 
 class Renderer
@@ -64,10 +60,11 @@ private:
     Scene* _scene;
     bool _scene_dirty = true;
     Camera* _camera;
-    ViewData _last_view_data;
+    glm::mat4 _last_view_matrix;
+    glm::mat4 _last_proj_matrix;
+    glm::vec2 _last_taa_jitter;
     EzBuffer _scene_buffer = VK_NULL_HANDLE;
     EzBuffer _view_buffer = VK_NULL_HANDLE;
-    EzBuffer _pre_view_buffer = VK_NULL_HANDLE;
     EzTexture _color_rt = VK_NULL_HANDLE;
     EzTexture _depth_rt = VK_NULL_HANDLE;
     EzTexture _velocity_rt = VK_NULL_HANDLE;

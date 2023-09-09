@@ -165,24 +165,26 @@ void Renderer::update_scene_buffer()
 
 void Renderer::update_view_buffer()
 {
-    ViewData view_data{};
-    view_data.view_matrix = _camera->get_view_matrix();
-    view_data.proj_matrix = _camera->get_proj_matrix();
-    view_data.view_position = glm::vec4(_camera->get_translation(), 0.0f);
-
-    if (_aa == TAA)
-    {
-        view_data.taa_jitter = taa_jitter_array[_frame_number % TAA_JITTER_COUNT] / glm::vec2(_width, _height) * 0.3f;
-        view_data.proj_matrix[3][0] += view_data.taa_jitter.x;
-        view_data.proj_matrix[3][1] += view_data.taa_jitter.y;
-    }
-
-    if (_frame_number == 0)
-        _last_view_data = view_data;
+    glm::vec2 taa_jitter = taa_jitter_array[_frame_number % TAA_JITTER_COUNT] / glm::vec2(_width, _height);
+    glm::mat4 proj_matrix = _camera->get_proj_matrix();
+    glm::mat4 view_matrix = _camera->get_view_matrix();
 
     ViewBufferType view_buffer_type{};
-    view_buffer_type.cur = view_data;
-    view_buffer_type.prev = _last_view_data;
+    view_buffer_type.view_matrix = view_matrix;
+    view_buffer_type.proj_matrix = proj_matrix;
+    view_buffer_type.taa_jitter = taa_jitter;
+    if (_frame_number == 0)
+    {
+        view_buffer_type.prev_view_matrix = view_matrix;
+        view_buffer_type.prev_proj_matrix = proj_matrix;
+        view_buffer_type.prev_taa_jitter = taa_jitter;
+    }
+    else
+    {
+        view_buffer_type.prev_view_matrix = _last_view_matrix;
+        view_buffer_type.prev_proj_matrix = _last_proj_matrix;
+        view_buffer_type.prev_taa_jitter = _last_taa_jitter;
+    }
 
     VkBufferMemoryBarrier2 barrier = ez_buffer_barrier(_view_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
     ez_pipeline_barrier(0, 1, &barrier, 0, nullptr);
@@ -194,7 +196,9 @@ void Renderer::update_view_buffer()
     barrier = ez_buffer_barrier(_view_buffer, stage_flags, access_flags);
     ez_pipeline_barrier(0, 1, &barrier, 0, nullptr);
 
-    _last_view_data = view_data;
+    _last_view_matrix = view_matrix;
+    _last_proj_matrix = proj_matrix;
+    _last_taa_jitter = taa_jitter;
 }
 
 void Renderer::render(EzSwapchain swapchain)

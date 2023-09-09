@@ -16,28 +16,28 @@ layout(std140, set = 0, binding = 0) uniform SceneBuffer
     mat4 transform;
 } scene_buffer;
 
-struct ViewData
+layout(std140, set = 0, binding = 1) uniform ViewBuffer
 {
     mat4 view_matrix;
     mat4 proj_matrix;
-    vec4 view_position;
+    mat4 prev_view_matrix;
+    mat4 prev_proj_matrix;
     vec2 taa_jitter;
-};
-
-layout(std140, set = 0, binding = 1) uniform ViewBuffer
-{
-    ViewData cur;
-    ViewData prev;
+    vec2 prev_taa_jitter;
 } view_buffer;
 
 void main() 
 {
     #ifdef MOTION_VECTORS
-    prev_screen_position = view_buffer.prev.proj_matrix * view_buffer.prev.view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
-    screen_position = view_buffer.cur.proj_matrix * view_buffer.cur.view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
-    gl_Position = screen_position;
+    prev_screen_position = view_buffer.prev_proj_matrix * view_buffer.prev_view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
+    screen_position = view_buffer.proj_matrix * view_buffer.view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
+
+    mat4 jitter_matrix = mat4(1.0);
+    jitter_matrix[3][0] += view_buffer.taa_jitter.x;
+    jitter_matrix[3][1] += view_buffer.taa_jitter.y;
+    gl_Position = jitter_matrix * screen_position;
     #else
-    gl_Position = view_buffer.cur.proj_matrix * view_buffer.cur.view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
+    gl_Position = view_buffer.proj_matrix * view_buffer.view_matrix * scene_buffer.transform * vec4(in_position, 1.0);
     #endif
     out_texcoord = in_texcoord;
     out_normal = mat3(transpose(inverse(scene_buffer.transform))) * in_normal;
